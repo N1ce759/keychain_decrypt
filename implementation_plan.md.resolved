@@ -1,0 +1,105 @@
+# Offline macOS Keychain Decryption — Rust Implementation
+
+Implement a Rust program to offline parse the [login.keychain-db](file:///Users/admin/Documents/toolcode/keychain_decrypt/login.keychain-db) file and decrypt the 'Chrome Safe Storage' generic-password entry, without calling macOS Security.framework APIs.
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Encryption algorithm correction**: The user's request specifies AES-CBC, but the actual [login.keychain-db](file:///Users/admin/Documents/toolcode/keychain_decrypt/login.keychain-db) file uses the **legacy Apple binary format** (`kych` magic) with **3DES-CBC** (Triple-DES in CBC mode, 24-byte key, 8-byte IV). This has been confirmed by:
+> - Examining the binary header (`kych` signature at offset 0)
+> - Reading the `DBBlob` structure with `0xFADE0711` magic and 8-byte IV fields
+> - Cross-referencing with chainbreaker, LaZagne, and Apple's open-source code
+>
+> The implementation will use **3DES-CBC** as that's what the file format requires. AES-CBC would produce incorrect results.
+
+> [!NOTE]
+> The Chrome Safe Storage password stored in the keychain is the key Chrome uses for its own encryption (e.g., for cookies via `v10`/`v11` prefixed data). The decrypted output is a **passphrase string** (not a raw 16-byte key). Chrome then applies its own PBKDF2 derivation to produce the actual AES key.
+
+## Decryption Flow (3-Level Key Hierarchy)
+
+```mermaid
+graph TD
+    A["User Password (plaintext)"] --> B["PBKDF2-HMAC-SHA1<br>salt from DBBlob, 1000 iterations"]
+    B --> C["24-byte Master Key"]
+    C --> D["3DES-CBC decrypt DBBlob ciphertext"]
+    D --> E["24-byte DB Key (wrapping key)"]
+    E --> F["3DES-CBC decrypt KeyBlob<br>with magicCmsIV"]
+    F --> G["Reverse first 32 bytes"]
+    G --> H["3DES-CBC decrypt again<br>with record IV"]
+    H --> I["24-byte Record Key"]
+    I --> J["3DES-CBC decrypt SSGP data<br>with SSGP IV"]
+    J --> K["Plaintext Password"]
+```
+
+## Proposed Changes
+
+### Rust Project Structure
+
+#### [NEW] [Cargo.toml](file:///Users/admin/Documents/toolcode/keychain_decrypt/Cargo.toml)
+Dependencies: `des` (3DES), `cbc` (CBC mode), `pbkdf2` + `hmac` + `sha1` (PBKDF2-HMAC-SHA1), `hex` (debug output), `block-padding` (PKCS7 unpadding).
+
+---
+
+#### [NEW] [src/main.rs](file:///Users/admin/Documents/toolcode/keychain_decrypt/src/main.rs)
+Entry point: reads the keychain file, accepts password as CLI arg, orchestrates parsing and decryption, outputs the Chrome Safe Storage password.
+
+---
+
+#### [NEW] [src/parser.rs](file:///Users/admin/Documents/toolcode/keychain_decrypt/src/parser.rs)
+
+Binary parser for the Apple Keychain format. Key data structures:
+
+| Struct | Fields | Purpose |
+|--------|--------|---------|
+| `ApplDbHeader` | signature, version, header_size, schema_offset, auth_offset | File header (20 bytes) |
+| `ApplDbSchema` | schema_size, table_count | Schema header |
+| `TableHeader` | table_size, table_id, record_count, records_offset, indexes_offset, free_list_head, record_numbers_count | Table metadata (28 bytes) |
+| `DbBlob` | magic, version, start_crypto, total_len, random_sig[16], sequence, idle_timeout, lock_on_sleep, salt[20], iv[8], blob_sig[20] | DB encryption metadata |
+| `KeyBlob` | magic, version, start_crypto, total_len, iv[8] | Key record encryption blob |
+| `Ssgp` | magic[4], label[16], iv[8] | Per-item encrypted data header |
+| `GenericPwHeader` | record_size, record_num, ..., account, service, generic | Generic password record attributes |
+
+Key functions:
+- `parse_header()` → `ApplDbHeader`
+- `parse_schema()` → table offset list
+- `parse_table()` → record offset list
+- `resolve_table_map()` → map table_id → table index
+- `find_generic_pw_by_service()` → find "Chrome Safe Storage" record
+- `extract_ssgp_data()` → SSGP IV + ciphertext from record
+
+---
+
+#### [NEW] [src/crypto.rs](file:///Users/admin/Documents/toolcode/keychain_decrypt/src/crypto.rs)
+
+Core decryption logic with these functions:
+
+| Function | Input | Output | Algorithm |
+|----------|-------|--------|-----------|
+| `derive_master_key` | password, salt | 24-byte key | PBKDF2-HMAC-SHA1, 1000 iter |
+| `kc_decrypt` | key[24], iv[8], ciphertext | plaintext | 3DES-CBC + PKCS7 unpad |
+| `decrypt_db_key` | master_key, DbBlob | 24-byte DB key | kc_decrypt on DbBlob ciphertext |
+| `decrypt_key_blob` | db_key, iv, ciphertext | 24-byte record key | Double 3DES-CBC with `magicCmsIV` + byte reversal |
+| `decrypt_ssgp` | record_key, ssgp_iv, data | plaintext password | kc_decrypt |
+
+Constants:
+- `MAGIC_CMS_IV: [u8; 8] = [0x4a, 0xdd, 0xa2, 0x2c, 0x79, 0xe8, 0x21, 0x05]`
+- `KEYCHAIN_SIGNATURE: &[u8] = b"kych"`
+- `BLOB_MAGIC: u32 = 0xFADE0711`
+- `SSGP_MAGIC: &[u8] = b"ssgp"`
+- `KEYLEN: usize = 24`
+- `BLOCKSIZE: usize = 8`
+
+---
+
+#### [NEW] [src/error.rs](file:///Users/admin/Documents/toolcode/keychain_decrypt/src/error.rs)
+Custom error enum for parse/crypto errors.
+
+## Verification Plan
+
+### Automated Tests
+1. **Build verification**: `cargo build --release` must compile without errors
+2. **Run with actual keychain**: `cargo run -- --keychain login.keychain-db --password <USER_PASSWORD>` should output the Chrome Safe Storage password
+3. **Cross-validate**: Compare output with `security find-generic-password -s "Chrome Safe Storage" -w ~/Library/Keychains/login.keychain-db` (requires user interaction)
+
+### Manual Verification
+- User runs the compiled binary with their login password and verifies the output matches what macOS `security` command returns for Chrome Safe Storage
