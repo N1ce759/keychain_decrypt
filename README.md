@@ -1,83 +1,83 @@
 # 🔐 keychain_decrypt
 
-Offline decryption tool for macOS `login.keychain-db` files, written in pure Rust.
+纯 Rust 编写的 macOS `login.keychain-db` 离线解密工具。
 
-Extracts the **Chrome Safe Storage** password from a keychain database without using Apple's Security.framework — useful for cross-platform forensics, backup recovery, and security research.
+无需调用 Apple Security.framework，直接从钥匙串数据库文件中提取 **Chrome Safe Storage** 密码——适用于跨平台取证、备份恢复和安全研究。
 
-## ✨ Features
+## ✨ 特性
 
-- **Pure Rust** — no C dependencies, no macOS SDK required
-- **Offline decryption** — operates directly on `.keychain-db` binary files
-- **Full key hierarchy** — PBKDF2 → DB Key → KeyBlob → SSGP, fully implemented
-- **Minimal binary** — release build with LTO, strip, and `opt-level = "z"`
+- **纯 Rust** — 无 C 依赖，无需 macOS SDK
+- **离线解密** — 直接操作 `.keychain-db` 二进制文件
+- **完整密钥层级** — PBKDF2 → DB Key → KeyBlob → SSGP 全链路实现
+- **极小体积** — Release 构建启用 LTO、strip 及 `opt-level = "z"`
 
-## 🔑 How It Works
+## 🔑 解密原理
 
 ```
-  User Password
-       │
-       ▼
+  用户密码
+     │
+     ▼
   ┌──────────────────────┐
-  │  PBKDF2-HMAC-SHA1    │  1000 iterations
-  │  + salt from DBBlob  │
+  │  PBKDF2-HMAC-SHA1    │  1000 次迭代
+  │  + DBBlob 中的 salt  │
   └──────────┬───────────┘
              │
              ▼
-        Master Key (24B)
+        主密钥 (24 字节)
              │
              ▼
   ┌──────────────────────┐
-  │  3DES-CBC decrypt    │  IV from DBBlob
-  │  DBBlob ciphertext   │
+  │  3DES-CBC 解密       │  IV 来自 DBBlob
+  │  DBBlob 密文         │
   └──────────┬───────────┘
              │
              ▼
-         DB Key (24B)
+        DB Key (24 字节)
              │
              ▼
   ┌──────────────────────┐
-  │  Two-pass 3DES-CBC   │  magicCmsIV → reverse → record IV
-  │  KeyBlob decrypt     │
+  │  两轮 3DES-CBC 解密  │  magicCmsIV → 反转 → 记录 IV
+  │  KeyBlob 解密        │
   └──────────┬───────────┘
              │
              ▼
-       Record Key (24B)
+      记录密钥 (24 字节)
              │
              ▼
   ┌──────────────────────┐
-  │  3DES-CBC decrypt    │  IV from SSGP header
-  │  SSGP ciphertext     │
+  │  3DES-CBC 解密       │  IV 来自 SSGP 头部
+  │  SSGP 密文           │
   └──────────┬───────────┘
              │
              ▼
-      Plaintext Password
+       明文密码
 ```
 
-## 📦 Prerequisites
+## 📦 环境要求
 
-- Rust 1.56+ (edition 2021)
-- Access to a `login.keychain-db` file (requires Full Disk Access on macOS)
-- The keychain's login password
+- Rust 1.56+（edition 2021）
+- 可访问的 `login.keychain-db` 文件（macOS 上需要完全磁盘访问权限）
+- 钥匙串的登录密码
 
-## 🚀 Usage
+## 🚀 使用方法
 
-### Build
+### 编译
 
 ```bash
-# Debug build
+# 调试构建
 cargo build
 
-# Optimized release build
+# 优化后的 Release 构建
 cargo build --release
 ```
 
-### Run
+### 运行
 
 ```bash
-keychain_decrypt --keychain <path-to-keychain> --password <keychain-password>
+keychain_decrypt --keychain <钥匙串路径> --password <钥匙串密码>
 ```
 
-**Example:**
+**示例：**
 
 ```bash
 ./target/release/keychain_decrypt \
@@ -85,7 +85,7 @@ keychain_decrypt --keychain <path-to-keychain> --password <keychain-password>
   --password "my_login_password"
 ```
 
-**Output:**
+**输出：**
 
 ```
 [*] Read keychain file: 273624 bytes
@@ -99,46 +99,46 @@ keychain_decrypt --keychain <path-to-keychain> --password <keychain-password>
 [*] Decrypted 3 key blobs
 [*] Found 1 'Chrome Safe Storage' entries
 [+] Chrome Safe Storage password (plaintext):
-    <decrypted_password>
+    <解密后的密码>
 [+] Hex: ...
 [+] Length: 16 bytes
 ```
 
-## 📁 Project Structure
+## 📁 项目结构
 
 ```
 keychain_decrypt/
-├── Cargo.toml          # Dependencies & release profile
+├── Cargo.toml          # 依赖配置 & Release 优化选项
 └── src/
-    ├── main.rs         # CLI entry point & orchestration
-    ├── crypto.rs       # PBKDF2, 3DES-CBC, key hierarchy decryption
-    ├── parser.rs       # Binary format parser (headers, tables, blobs)
-    └── error.rs        # Unified error types
+    ├── main.rs         # CLI 入口 & 解密流程编排
+    ├── crypto.rs       # PBKDF2、3DES-CBC、密钥层级解密
+    ├── parser.rs       # 二进制格式解析（头部、表、Blob）
+    └── error.rs        # 统一错误类型
 ```
 
-| Module     | Responsibility                                                       |
+| 模块       | 职责                                                                 |
 |------------|----------------------------------------------------------------------|
-| `main`     | Argument parsing, high-level decrypt flow, output formatting         |
-| `crypto`   | `derive_master_key`, `decrypt_db_key`, `decrypt_key_blob`, `decrypt_ssgp` |
-| `parser`   | Big-endian readers, header/schema/table/DBBlob/SSGP parsing         |
-| `error`    | `KeychainError` enum with `Display` and `From<io::Error>`           |
+| `main`     | 命令行参数解析、高层解密流程、输出格式化                                |
+| `crypto`   | `derive_master_key`、`decrypt_db_key`、`decrypt_key_blob`、`decrypt_ssgp` |
+| `parser`   | 大端序读取、头部 / Schema / 表 / DBBlob / SSGP 解析                   |
+| `error`    | `KeychainError` 枚举，实现 `Display` 和 `From<io::Error>`            |
 
-## 🔧 Dependencies
+## 🔧 依赖项
 
-| Crate    | Version | Purpose                        |
-|----------|---------|--------------------------------|
-| `des`    | 0.8     | Triple DES (3DES / DES-EDE3)   |
-| `cbc`    | 0.1     | CBC block cipher mode           |
-| `pbkdf2` | 0.12    | PBKDF2 key derivation           |
-| `hmac`   | 0.12    | HMAC for PBKDF2                 |
-| `sha1`   | 0.10    | SHA-1 hash for PBKDF2-HMAC-SHA1|
-| `cipher` | 0.4     | Block cipher traits             |
-| `hex`    | 0.4     | Hex encoding for debug output   |
+| Crate    | 版本  | 用途                            |
+|----------|-------|---------------------------------|
+| `des`    | 0.8   | Triple DES（3DES / DES-EDE3）    |
+| `cbc`    | 0.1   | CBC 分组密码模式                 |
+| `pbkdf2` | 0.12  | PBKDF2 密钥派生                  |
+| `hmac`   | 0.12  | 用于 PBKDF2 的 HMAC              |
+| `sha1`   | 0.10  | PBKDF2-HMAC-SHA1 所需的 SHA-1    |
+| `cipher` | 0.4   | 分组密码 Trait                    |
+| `hex`    | 0.4   | 十六进制编码（调试输出）          |
 
-## ⚠️ Disclaimer
+## ⚠️ 免责声明
 
-This tool is intended for **legitimate security research, forensics, and personal backup recovery only**. Unauthorized access to others' keychain data may violate applicable laws. Use responsibly.
+本工具仅用于**合法的安全研究、数字取证及个人备份恢复**。未经授权访问他人钥匙串数据可能违反相关法律法规，请合法合规使用。
 
-## 📄 License
+## 📄 许可证
 
 MIT
