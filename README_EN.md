@@ -57,7 +57,7 @@ Extracts the **Chrome Safe Storage** password from a keychain database without u
 
 - Rust 1.56+ (edition 2021)
 - Access to a `login.keychain-db` file (requires Full Disk Access on macOS)
-- The keychain's login password
+- User login password
 
 ## 🚀 Usage
 
