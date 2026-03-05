@@ -1,4 +1,4 @@
-# 🔐 keychain_decrypt
+# 🔐 keychain_decrypt ｜ English version: [README_EN.md](./README_EN.md)
 
 纯 Rust 编写的 macOS `login.keychain-db` 离线解密工具。
 
@@ -57,7 +57,7 @@
 
 - Rust 1.56+（edition 2021）
 - 可访问的 `login.keychain-db` 文件（macOS 上需要完全磁盘访问权限）
-- 钥匙串的登录密码
+- USER的登录密码
 
 ## 🚀 使用方法
 
